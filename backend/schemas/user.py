@@ -1,6 +1,7 @@
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
 from backend.models.user import UserRole
+from pydantic import ConfigDict
 
 
 # Base
@@ -34,8 +35,7 @@ class UserResponse(UserBase):
     is_active: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TokenResponse(BaseModel):

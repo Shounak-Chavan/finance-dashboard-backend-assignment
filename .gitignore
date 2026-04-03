@@ -25,9 +25,22 @@ htmlcov/
 !.env.example
 venv/
 
+# Additional secret files
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.secret
+secrets.*
+
 # Local databases
 *.db
 *.sqlite3
+
+# Local tool state
+.python-version
+.ipynb_checkpoints/
 
 # Editor/OS files
 .vscode/

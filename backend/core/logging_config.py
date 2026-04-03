@@ -6,7 +6,7 @@ def setup_logging() -> None:
     level_name = os.getenv("LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
 
-    # 🔥 create logs folder
+    # create logs folder
     os.makedirs("logs", exist_ok=True)
 
     logging.basicConfig(

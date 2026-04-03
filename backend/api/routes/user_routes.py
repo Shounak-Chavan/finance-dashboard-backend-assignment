@@ -1,55 +1,42 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, func
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from backend.db.session import get_db
-from backend.schemas.user import UserCreate, UserResponse, UserUpdate
 from backend.services import user_service
+from backend.schemas.user import UserCreate, UserUpdate
 from backend.api.rbac import require_roles
-from backend.models.user import User, UserRole
+from backend.models.user import UserRole  
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
-
-@router.post("/bootstrap-admin", response_model=UserResponse)
-async def bootstrap_admin(
-    user: UserCreate,
-    db: AsyncSession = Depends(get_db),
-):
-    total_users_result = await db.execute(select(func.count()).select_from(User))
-    total_users = total_users_result.scalar() or 0
-
-    if total_users > 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Bootstrap admin is only allowed when no users exist",
-        )
-
-    user.role = UserRole.ADMIN
-    return await user_service.create_user(db, user)
-
-
-@router.post("/", response_model=UserResponse)
+# CREATE USER (ADMIN ONLY)
+@router.post(
+    "/",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_roles([UserRole.ADMIN]))]
+)
 async def create_user(
-    user: UserCreate,
+    data: UserCreate,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(require_roles([UserRole.ADMIN]))
 ):
-    return await user_service.create_user(db, user)
+    return await user_service.create_user(db, data)
 
+# GET ALL USERS (ADMIN ONLY)
+@router.get(
+    "/",
+    dependencies=[Depends(require_roles([UserRole.ADMIN]))]  
+)
+async def get_users(db: AsyncSession = Depends(get_db)):
+    return await user_service.get_all_users(db)
 
-@router.get("/", response_model=list[UserResponse])
-async def get_users(
-    db: AsyncSession = Depends(get_db),
-    current_user=Depends(require_roles([UserRole.ADMIN]))
-):
-    return await user_service.get_users(db)
-
-
-@router.patch("/{user_id}", response_model=UserResponse)
+# UPDATE USER (ADMIN ONLY)
+@router.put(
+    "/{user_id}",
+    dependencies=[Depends(require_roles([UserRole.ADMIN]))]  
+)
 async def update_user(
     user_id: int,
-    payload: UserUpdate,
+    data: UserUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(require_roles([UserRole.ADMIN])),
 ):
-    return await user_service.update_user(db, user_id, payload.model_dump(exclude_unset=True))
+    return await user_service.update_user(db, user_id, data)

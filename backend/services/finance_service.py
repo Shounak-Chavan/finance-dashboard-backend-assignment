@@ -1,173 +1,106 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import or_, select, func
+from datetime import datetime, timezone, date as dt_date
+from sqlalchemy import select, or_
 from fastapi import HTTPException, status
-from datetime import date, datetime, timezone
 
 from backend.models.finance import FinancialRecord, RecordType
-from backend.models.user import UserRole
 from backend.schemas.finance import FinancialRecordCreate, FinancialRecordUpdate
-from backend.core.logging_config import get_logger
-
-logger = get_logger(__name__)
 
 
-def _base_filters(user_id: int, user_role: UserRole, target_user_id: int | None = None):
-    filters = [FinancialRecord.is_deleted.is_(False)]
-    if user_role == UserRole.ADMIN:
-        if target_user_id is not None:
-            filters.append(FinancialRecord.user_id == target_user_id)
-    else:
-        filters.append(FinancialRecord.user_id == user_id)
-    return filters
-
-
-async def create_record(
-        db: AsyncSession,
-        user_id: int,
-        data: FinancialRecordCreate
-):
-    record = FinancialRecord(
-        user_id=user_id,
-        amount=data.amount,
-        type=data.type,
-        category=data.category,
-        date=data.date,
-        note=data.note
-    )
+# CREATE
+async def create_record(db: AsyncSession, data: FinancialRecordCreate, user_id: int):
+    record = FinancialRecord(**data.model_dump(), user_id=user_id)
 
     db.add(record)
     await db.commit()
     await db.refresh(record)
-    logger.info("Record created: id=%s user_id=%s", record.id, user_id)
+
     return record
 
 
+# GET (WITH FILTERS + PAGINATION)
 async def get_records(
-        db: AsyncSession,
-        user_id: int,
-        user_role: UserRole,
-        page: int = 1,
-        limit: int = 10,
-        category: str | None = None,
-        record_type: RecordType | None = None,
-        start_date: date | None = None,
-        end_date: date | None = None,
-        target_user_id: int | None = None,
+    db: AsyncSession,
+    skip: int = 0,
+    limit: int = 10,
+    category: str | None = None,
+    record_type: RecordType | None = None,
+    start_date: dt_date | None = None,
+    end_date: dt_date | None = None,
+    user_id: int | None = None,
 ):
-    offset = (page - 1) * limit
-
-    filters = _base_filters(user_id, user_role, target_user_id)
+    query = select(FinancialRecord).where(FinancialRecord.is_deleted == False)
 
     if category:
-        filters.append(FinancialRecord.category == category)
+        query = query.where(FinancialRecord.category == category)
+
     if record_type:
-        filters.append(FinancialRecord.type == record_type)
+        query = query.where(FinancialRecord.type == record_type)
+
     if start_date:
-        filters.append(FinancialRecord.date >= start_date)
+        query = query.where(FinancialRecord.date >= start_date)
+
     if end_date:
-        filters.append(FinancialRecord.date <= end_date)
+        query = query.where(FinancialRecord.date <= end_date)
+
+    if user_id:
+        query = query.where(FinancialRecord.user_id == user_id)
 
     result = await db.execute(
-        select(FinancialRecord)
-        .where(*filters)
-        .order_by(FinancialRecord.date.desc(), FinancialRecord.id.desc())
-        .offset(offset)
+        query.order_by(FinancialRecord.date.desc(), FinancialRecord.id.desc())
+        .offset(skip)
         .limit(limit)
     )
+
     records = result.scalars().all()
 
-    total_result = await db.execute(
-        select(func.count()).select_from(FinancialRecord).where(*filters)
-    )
-    total = total_result.scalar()
-
-    return {
-        "data": records,
-        "page": page,
-        "limit": limit,
-        "total": total
-    }
+    return records
 
 
+# SEARCH (CATEGORY)
 async def search_records(
     db: AsyncSession,
-    user_id: int,
-    user_role: UserRole,
-    query: str,
-    page: int = 1,
+    q: str,
+    skip: int = 0,
     limit: int = 10,
-    target_user_id: int | None = None,
+    user_id: int | None = None,
 ):
-    offset = (page - 1) * limit
-    filters = _base_filters(user_id, user_role, target_user_id)
-
-    text_filter = or_(
-        FinancialRecord.category.ilike(f"%{query}%"),
-        FinancialRecord.note.ilike(f"%{query}%"),
+    query = select(FinancialRecord).where(
+        FinancialRecord.is_deleted == False,
+        or_(
+            FinancialRecord.category.ilike(f"%{q}%"),
+            FinancialRecord.note.ilike(f"%{q}%"),
+        ),
     )
+
+    if user_id:
+        query = query.where(FinancialRecord.user_id == user_id)
 
     result = await db.execute(
-        select(FinancialRecord)
-        .where(*filters, text_filter)
-        .order_by(FinancialRecord.date.desc(), FinancialRecord.id.desc())
-        .offset(offset)
+        query.order_by(FinancialRecord.date.desc(), FinancialRecord.id.desc())
+        .offset(skip)
         .limit(limit)
     )
-    records = result.scalars().all()
 
-    total_result = await db.execute(
-        select(func.count())
-        .select_from(FinancialRecord)
-        .where(*filters, text_filter)
-    )
-    total = total_result.scalar() or 0
-
-    return {
-        "data": records,
-        "page": page,
-        "limit": limit,
-        "total": total,
-    }
+    return result.scalars().all()
 
 
-async def delete_record(
-        db: AsyncSession,
-        record_id: int,
-        user_id: int,
-        user_role: UserRole,
-):
-    filters = _base_filters(user_id, user_role)
-    filters.append(FinancialRecord.id == record_id)
-
-    result = await db.execute(select(FinancialRecord).where(*filters))
-
-    record = result.scalars().first()
-
-    if not record:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Record not found"
-        )
-
-    record.is_deleted = True
-    record.deleted_at = datetime.now(timezone.utc)
-    await db.commit()
-    logger.info("Record soft-deleted: id=%s by user_id=%s", record_id, user_id)
-    return {"message": "Record deleted successfully"}
-
-
-async def update_record(
+#GET BY ID (OPTIONAL USER CHECK)
+async def get_record_by_id(
     db: AsyncSession,
     record_id: int,
-    user_id: int,
-    user_role: UserRole,
-    payload: FinancialRecordUpdate,
+    user_id: int | None = None,
 ):
-    filters = _base_filters(user_id, user_role)
-    filters.append(FinancialRecord.id == record_id)
+    query = select(FinancialRecord).where(
+        FinancialRecord.id == record_id,
+        FinancialRecord.is_deleted == False,
+    )
 
-    result = await db.execute(select(FinancialRecord).where(*filters))
-    record = result.scalars().first()
+    if user_id:
+        query = query.where(FinancialRecord.user_id == user_id)
+
+    result = await db.execute(query)
+    record = result.scalar_one_or_none()
 
     if not record:
         raise HTTPException(
@@ -175,11 +108,38 @@ async def update_record(
             detail="Record not found",
         )
 
-    update_data = payload.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
+    return record
+
+
+#UPDATE
+async def update_record(
+    db: AsyncSession,
+    record_id: int,
+    data: FinancialRecordUpdate,
+    user_id: int | None = None,
+):
+    record = await get_record_by_id(db, record_id, user_id)
+
+    for key, value in data.model_dump(exclude_unset=True).items():
         setattr(record, key, value)
 
     await db.commit()
     await db.refresh(record)
-    logger.info("Record updated: id=%s by user_id=%s", record_id, user_id)
+
     return record
+
+
+# DELETE (SOFT DELETE)
+async def delete_record(
+    db: AsyncSession,
+    record_id: int,
+    user_id: int | None = None,
+):
+    record = await get_record_by_id(db, record_id, user_id)
+
+    record.is_deleted = True
+    record.deleted_at = datetime.now(timezone.utc)
+
+    await db.commit()
+
+    return {"message": "Record deleted successfully"}

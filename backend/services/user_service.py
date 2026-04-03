@@ -1,59 +1,93 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from fastapi import HTTPException, status
-from backend.models.user import User
-from backend.schemas.user import UserCreate
-from backend.core.security import hash_password, verify_password
-from backend.core.logging_config import get_logger
 
-logger = get_logger(__name__)
+from backend.models.user import User, UserRole
+from backend.schemas.user import UserCreate, UserUpdate
+from backend.core.security import hash_password
 
 
-async def create_user(
-        db: AsyncSession,
-        user_data: UserCreate
-):
-    existing_user = await get_user_by_email(db, user_data.email)
+# CREATE USER
+async def create_user(db: AsyncSession, data: UserCreate):
+    result = await db.execute(select(User).where(User.email == data.email))
+    existing_user = result.scalar_one_or_none()
 
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User with this email already exists"
+            detail="Email already registered"
         )
 
     user = User(
-        name=user_data.name,
-        email=user_data.email,
-        hashed_password=hash_password(user_data.password),
-        role=user_data.role
+        name=data.name,
+        email=data.email,
+        hashed_password=hash_password(data.password),
+        role=data.role or UserRole.VIEWER,
+        is_active=True
     )
 
     db.add(user)
     await db.commit()
     await db.refresh(user)
-    logger.info("User created: id=%s email=%s role=%s", user.id, user.email, user.role.value)
+
     return user
 
 
-async def get_user_by_email(db: AsyncSession, email: str):
-    result = await db.execute(select(User).where(User.email == email))
-    return result.scalars().first()
+# BOOTSTRAP ADMIN
+async def bootstrap_admin(db: AsyncSession, data: UserCreate):
+    result = await db.execute(select(User).where(User.role == UserRole.ADMIN))
+    existing_admin = result.scalars().first()
+
+    # If admin exists → update (idempotent behavior)
+    if existing_admin:
+        existing_admin.name = data.name
+        existing_admin.hashed_password = hash_password(data.password)
+        existing_admin.is_active = True
+
+        await db.commit()
+        await db.refresh(existing_admin)
+        return existing_admin
+
+    # If user exists with same email → upgrade to admin
+    email_result = await db.execute(select(User).where(User.email == data.email))
+    email_user = email_result.scalar_one_or_none()
+
+    if email_user:
+        email_user.name = data.name
+        email_user.hashed_password = hash_password(data.password)
+        email_user.role = UserRole.ADMIN
+        email_user.is_active = True
+
+        await db.commit()
+        await db.refresh(email_user)
+        return email_user
+
+    # Create new admin
+    admin_user = User(
+        name=data.name,
+        email=data.email,
+        hashed_password=hash_password(data.password),
+        role=UserRole.ADMIN,
+        is_active=True,
+    )
+
+    db.add(admin_user)
+    await db.commit()
+    await db.refresh(admin_user)
+
+    return admin_user
 
 
-async def get_users(
-        db: AsyncSession
-):
+# GET ALL USERS
+async def get_all_users(db: AsyncSession):
     result = await db.execute(select(User))
     return result.scalars().all()
 
 
-async def update_user(
-        db: AsyncSession,
-        user_id: int,
-        update_data: dict
-):
+# GET USER BY ID
+async def get_user_by_id(db: AsyncSession, user_id: int):
     result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalars().first()
+    user = result.scalar_one_or_none()
 
     if not user:
         raise HTTPException(
@@ -61,27 +95,17 @@ async def update_user(
             detail="User not found"
         )
 
-    for key, value in update_data.items():
-        if value is not None:
-            setattr(user, key, value)
-
-    await db.commit()
-    await db.refresh(user)
-    logger.info("User updated: id=%s", user_id)
     return user
 
 
-async def authenticate_user(db: AsyncSession, email: str, password: str):
-    user = await get_user_by_email(db, email)
+# UPDATE USER
+async def update_user(db: AsyncSession, user_id: int, data: UserUpdate):
+    user = await get_user_by_id(db, user_id)
 
-    if not user or not verify_password(password, user.hashed_password):
-        return None
+    for key, value in data.model_dump(exclude_unset=True).items():
+        setattr(user, key, value)
 
-    if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Inactive user cannot log in",
-        )
+    await db.commit()
+    await db.refresh(user)
 
-    logger.info("User authenticated: id=%s", user.id)
     return user

@@ -1,9 +1,10 @@
-from contextlib import asynccontextmanager
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from contextlib import asynccontextmanager
 
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.errors import RateLimitExceeded
@@ -18,14 +19,17 @@ from backend.api.routes import auth_routes, user_routes, finance_routes, summary
 from backend.api.middleware.request_logger import RequestLoggingMiddleware
 
 
-def create_app() -> FastAPI:
-    # 🔥 setup logging first
-    setup_logging()
-
-    @asynccontextmanager
-    async def lifespan(app: FastAPI):
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 🚫 Skip init_db during tests
+    if os.getenv("TESTING") != "1":
         await init_db()
-        yield
+    yield
+
+
+def create_app() -> FastAPI:
+    # setup logging first
+    setup_logging()
 
     app = FastAPI(
         title=settings.APP_NAME,
@@ -33,7 +37,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # ✅ CORS
+    # CORS
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],  # change in production
@@ -42,7 +46,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # ✅ Rate Limiting (SlowAPI)
+    # Rate Limiting (SlowAPI)
     app.state.limiter = limiter
     app.add_middleware(SlowAPIMiddleware)
 
@@ -53,19 +57,19 @@ def create_app() -> FastAPI:
             content={"detail": "Rate limit exceeded"}
         )
 
-    # ✅ Request Logging Middleware
+    # Request Logging Middleware
     app.add_middleware(RequestLoggingMiddleware)
 
-    # ✅ Global Exception Handlers
+    # Global Exception Handlers
     register_exception_handlers(app)
 
-    # ✅ Routers
+    #  Routers
     app.include_router(auth_routes.router)
     app.include_router(user_routes.router)
     app.include_router(finance_routes.router)
     app.include_router(summary_routes.router)
 
-    # ✅ Health Check
+    # Health Check
     @app.get("/")
     async def root():
         return {"message": f"{settings.APP_NAME} is running"}
