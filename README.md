@@ -42,6 +42,64 @@ The solution includes:
 - alembic/: migration configuration and revision history
 - tests/: integration-style API tests with in-memory SQLite
 
+## Project File Structure
+```text
+Project/
+|-- alembic/
+|   |-- versions/
+|   |   `-- 1ec7314b947f_initial_tables.py
+|   |-- env.py
+|   |-- README
+|   `-- script.py.mako
+|-- backend/
+|   |-- api/
+|   |   |-- middleware/
+|   |   |   `-- request_logger.py
+|   |   |-- routes/
+|   |   |   |-- auth_routes.py
+|   |   |   |-- finance_routes.py
+|   |   |   |-- summary_routes.py
+|   |   |   `-- user_routes.py
+|   |   |-- dependencies.py
+|   |   `-- rbac.py
+|   |-- core/
+|   |   |-- __init__.py
+|   |   |-- config.py
+|   |   |-- exceptions.py
+|   |   |-- logging_config.py
+|   |   |-- rate_limiter.py
+|   |   `-- security.py
+|   |-- db/
+|   |   |-- __init__.py
+|   |   |-- base.py
+|   |   |-- seed.py
+|   |   `-- session.py
+|   |-- models/
+|   |   |-- __init__.py
+|   |   |-- finance.py
+|   |   `-- user.py
+|   |-- schemas/
+|   |   |-- __init__.py
+|   |   |-- finance.py
+|   |   `-- user.py
+|   |-- services/
+|   |   |-- __init__.py
+|   |   |-- finance_service.py
+|   |   |-- summary_service.py
+|   |   `-- user_service.py
+|   `-- main.py
+|-- logs/
+|-- tests/
+|   |-- conftest.py
+|   `-- test_finance_features.py
+|-- .env.example
+|-- .gitignore
+|-- alembic.ini
+|-- pyproject.toml
+|-- README.md
+`-- requirements.txt
+```
+
 ## Data Model
 ### User
 - id
