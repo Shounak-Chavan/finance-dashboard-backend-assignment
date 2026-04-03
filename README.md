@@ -17,7 +17,7 @@ The solution includes:
 - Async database persistence with migration support
 
 ## Tech Stack
-- Python 3.13+
+- Python 3.10+
 - FastAPI
 - SQLAlchemy 2.0 (Async)
 - PostgreSQL via asyncpg
@@ -53,9 +53,12 @@ Project/
 |   `-- script.py.mako
 |-- backend/
 |   |-- api/
+|   |   |-- __init__.py
 |   |   |-- middleware/
+|   |   |   |-- __init__.py
 |   |   |   `-- request_logger.py
 |   |   |-- routes/
+|   |   |   |-- __init__.py
 |   |   |   |-- auth_routes.py
 |   |   |   |-- finance_routes.py
 |   |   |   |-- summary_routes.py
@@ -159,6 +162,21 @@ Notes:
 ### Auth
 - POST /auth/login
 
+### Example Login
+POST /auth/login
+
+Form Data:
+- username: admin@example.com
+- password: admin123
+
+Response:
+```json
+{
+  "access_token": "<JWT_TOKEN>",
+  "token_type": "bearer"
+}
+```
+
 ### Users (admin only)
 - POST /users/
 - GET /users/
@@ -171,6 +189,30 @@ Notes:
 - PUT /records/{record_id} (admin)
 - DELETE /records/{record_id} (admin)
   - Soft delete sets is_deleted = true and deleted_at timestamp
+
+### Example Create Record
+POST /records/
+
+Headers:
+- Authorization: Bearer <TOKEN>
+
+Body:
+```json
+{
+  "amount": 1000,
+  "type": "income",
+  "category": "salary",
+  "date": "2026-04-01"
+}
+```
+
+Curl:
+```bash
+curl -X POST "http://127.0.0.1:8000/records/" \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"amount":1000,"type":"income","category":"salary","date":"2026-04-01"}'
+```
 
 ### Summary
 - GET /summary/ (admin, analyst, viewer)
@@ -251,9 +293,15 @@ Open Swagger docs:
 pytest -q
 ```
 
+### Test Results
+All tests passing:
+
+4 passed, 0 failed
+
 Current tests verify:
 - Login and token flow
 - Record creation
+- Record update/delete flow
 - Soft delete behavior
 - Summary totals (income, expense, net)
 
@@ -307,6 +355,12 @@ Implemented:
 - This repository is the original implementation for assignment evaluation.
 - If a deployed URL is required, include it in the submission form.
 - Ensure secrets are rotated before sharing publicly.
+
+## Future Improvements
+- Add advanced analytics (category totals, trends)
+- Add refresh tokens
+- Add Docker support
+- Add caching (Redis)
 
 ## Safety Checklist Before Submission
 1. Confirm .env is not committed.
